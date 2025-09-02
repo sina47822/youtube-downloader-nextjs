@@ -41,7 +41,6 @@ export async function POST(req: NextRequest) {
     const args = [
       ...argsPrefix,
       '-f', fmt,
-      '--remux-video', 'mp4',
       '--restrict-filenames',
       '--no-playlist',
       '--newline',

@@ -37,7 +37,7 @@ export default function Page() {
     setLoading(true)
 
     // اگر می‌خواهی Playlist را هم بگیری، ?playlist=1 اضافه کن
-    const es = new EventSource(`/api/download/stream?url=${encodeURIComponent(url)}`)
+    const es = new EventSource(`/api/download/?url=${encodeURIComponent(url)}`)
     esRef.current = es
 
     es.addEventListener('info', (ev) => {
