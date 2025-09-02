@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y python3-pip && rm -rf /var/lib/apt/list
 
 WORKDIR /app
 COPY package*.json .
-RUN npm ci --omit=dev
+RUN npm ci
 COPY . .
 RUN npm run build
 
