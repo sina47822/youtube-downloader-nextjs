@@ -1,46 +1,75 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-function toErrorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message
-  try { return JSON.stringify(err) } catch { return String(err) }
+function formatBytes(b: number): string {
+  if (!Number.isFinite(b) || b <= 0) return '0 B'
+  const u = ['B','KB','MB','GB','TB']
+  let i = 0, n = b
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++ }
+  return `${n.toFixed(1)} ${u[i]}`
 }
+
+type Prog = { percent: number; downloadedBytes: number; totalBytes: number; speed?: string; eta?: string }
 
 export default function Page() {
   const [url, setUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
+  const [prog, setProg] = useState<Prog | null>(null)
+  const esRef = useRef<EventSource | null>(null)
+
+  useEffect(() => () => { esRef.current?.close() }, [])
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setError(null)
     setDownloadUrl(null)
+    setProg(null)
     setLoading(true)
-    try {
-      const res = await fetch('/api/download', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-      })
-      const ct = res.headers.get('content-type') || ''
-      const data = ct.includes('application/json') ? await res.json() : {}
-      if (!res.ok || !('ok' in data)) {
-        const txt = ct.includes('application/json') ? data?.error : await res.text()
-        throw new Error(typeof txt === 'string' ? txt : 'خطا')
+
+    // از SSE استفاده می‌کنیم
+    const es = new EventSource(`/api/download/stream?url=${encodeURIComponent(url)}`)
+    esRef.current = es
+
+    es.addEventListener('progress', (ev) => {
+      try {
+        const data = JSON.parse((ev as MessageEvent).data) as Prog
+        setProg(data)
+      } catch {}
+    })
+
+    es.addEventListener('done', (ev) => {
+      try {
+        const data = JSON.parse((ev as MessageEvent).data) as { downloadUrl: string }
+        setDownloadUrl(data.downloadUrl)
+      } finally {
+        setLoading(false)
+        es.close()
       }
-      if (!data.ok) throw new Error(data.error || 'خطا')
-      setDownloadUrl(data.downloadUrl as string)
-    } catch (err: unknown) {
-      setError(toErrorMessage(err) || 'خطای ناشناخته')
-    } finally {
-      setLoading(false)
-    }
+    })
+
+    es.addEventListener('error', (ev) => {
+      try {
+        const data = JSON.parse((ev as MessageEvent).data) as { error?: string }
+        setError(data?.error || 'خطا در دانلود')
+      } catch {
+        setError('خطا در دانلود')
+      } finally {
+        setLoading(false)
+        es.close()
+      }
+    })
   }
+
+  const percent = prog?.percent ?? 0
+  const downloaded = formatBytes(prog?.downloadedBytes ?? 0)
+  const total = formatBytes(prog?.totalBytes ?? 0)
 
   return (
     <main className="max-w-xl mx-auto p-6">
       <h1 className="text-2xl font-bold mb-4">دانلود YouTube با yt-dlp</h1>
+
       <form onSubmit={onSubmit} className="space-y-3">
         <input
           type="url"
@@ -54,10 +83,29 @@ export default function Page() {
           {loading ? 'در حال دانلود...' : 'دانلود'}
         </button>
       </form>
+
+      {prog && (
+        <div className="mt-4 space-y-2">
+          <div className="w-full bg-gray-200 rounded h-3 overflow-hidden">
+            <div
+              className="bg-green-600 h-3"
+              style={{ width: `${Math.min(100, Math.max(0, percent)).toFixed(1)}%` }}
+            />
+          </div>
+          <div className="text-sm text-gray-700">
+            {percent.toFixed(1)}% — {downloaded} / {total}
+            {prog.speed ? <> — سرعت: {prog.speed}</> : null}
+            {prog.eta ? <> — زمان باقیمانده: {prog.eta}</> : null}
+          </div>
+        </div>
+      )}
+
       {error && <p className="text-red-600 mt-4">{error}</p>}
+
       {downloadUrl && (
         <a href={downloadUrl} className="mt-4 inline-block underline">دریافت فایل</a>
       )}
+
       <p className="text-sm text-gray-500 mt-6">
         فقط لینک‌های یوتیوب مجاز است. لینک ایجادشده یک‌بارمصرف است.
       </p>
