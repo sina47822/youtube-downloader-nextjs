@@ -2,20 +2,21 @@ services:
   next-app:
     container_name: ytpdl-next-app
     build:
-      context: ./
+      context: .
       dockerfile: Dockerfile
-      args:
-        ENV_VARIABLE: ${ENV_VARIABLE}
-        NEXT_PUBLIC_ENV_VARIABLE: ${NEXT_PUBLIC_ENV_VARIABLE}
-    restart: always
+    environment:
+      - DOWNLOAD_DIR=/data/downloads
+      - YTDLP_PATH=/usr/local/bin/yt-dlp
     ports:
       - "3002:3000"
+    restart: always
     networks:
       - my_network
+    volumes:
+      - ytpdl_data:/data/downloads
 
-  # Add more containers below (nginx, postgres, etc.)
+volumes:
+  ytpdl_data:
 
-# Define a network, which allows containers to communicate
-# with each other, by using their container name as a hostname
 networks:
   my_network:

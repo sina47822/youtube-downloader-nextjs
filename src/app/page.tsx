@@ -10,13 +10,18 @@ function formatBytes(b: number): string {
 }
 
 type Prog = { percent: number; downloadedBytes: number; totalBytes: number; speed?: string; eta?: string }
+type FileItem = { downloadUrl: string; filename: string; sizeBytes: number }
 
 export default function Page() {
   const [url, setUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null) // برای حالت تک‌فایل (سازگاری قدیمی)
   const [prog, setProg] = useState<Prog | null>(null)
+  const [title, setTitle] = useState<string | null>(null)
+  const [totalBytes, setTotalBytes] = useState<number | null>(null)
+  const [files, setFiles] = useState<FileItem[]>([]) // ⟵ همهٔ فایل‌ها (برای Playlist چندتا)
+
   const esRef = useRef<EventSource | null>(null)
 
   useEffect(() => () => { esRef.current?.close() }, [])
@@ -26,27 +31,43 @@ export default function Page() {
     setError(null)
     setDownloadUrl(null)
     setProg(null)
+    setTitle(null)
+    setTotalBytes(null)
+    setFiles([])
     setLoading(true)
 
-    // از SSE استفاده می‌کنیم
+    // اگر می‌خواهی Playlist را هم بگیری، ?playlist=1 اضافه کن
     const es = new EventSource(`/api/download/stream?url=${encodeURIComponent(url)}`)
     esRef.current = es
+
+    es.addEventListener('info', (ev) => {
+      try {
+        const data = JSON.parse((ev as MessageEvent).data) as { title?: string; totalBytes?: number }
+        if (data.title) setTitle(data.title)
+        if (typeof data.totalBytes === 'number') setTotalBytes(data.totalBytes)
+      } catch {}
+    })
 
     es.addEventListener('progress', (ev) => {
       try {
         const data = JSON.parse((ev as MessageEvent).data) as Prog
         setProg(data)
+        if (typeof data.totalBytes === 'number' && !totalBytes) setTotalBytes(data.totalBytes)
       } catch {}
     })
 
-    es.addEventListener('done', (ev) => {
+    es.addEventListener('file', (ev) => {
       try {
-        const data = JSON.parse((ev as MessageEvent).data) as { downloadUrl: string }
-        setDownloadUrl(data.downloadUrl)
-      } finally {
-        setLoading(false)
-        es.close()
-      }
+        const data = JSON.parse((ev as MessageEvent).data) as FileItem
+        setFiles(prev => [...prev, data])
+        // برای سازگاری با نسخهٔ قدیمی:
+        if (!downloadUrl) setDownloadUrl(data.downloadUrl)
+      } catch {}
+    })
+
+    es.addEventListener('done', () => {
+      setLoading(false)
+      es.close()
     })
 
     es.addEventListener('error', (ev) => {
@@ -62,13 +83,13 @@ export default function Page() {
     })
   }
 
-  const percent = prog?.percent ?? 0
+  const percent = prog?.percent ?? (totalBytes ? Math.min(100, Math.round(((prog?.downloadedBytes ?? 0) / totalBytes) * 100)) : 0)
   const downloaded = formatBytes(prog?.downloadedBytes ?? 0)
-  const total = formatBytes(prog?.totalBytes ?? 0)
+  const total = formatBytes(totalBytes ?? prog?.totalBytes ?? 0)
 
   return (
-    <main className="max-w-xl mx-auto p-6">
-      <h1 className="text-2xl font-bold mb-4">دانلود YouTube با yt-dlp</h1>
+    <main className="max-w-xl mx-auto p-6 space-y-4">
+      <h1 className="text-2xl font-bold">دانلود YouTube با yt-dlp</h1>
 
       <form onSubmit={onSubmit} className="space-y-3">
         <input
@@ -84,8 +105,10 @@ export default function Page() {
         </button>
       </form>
 
-      {prog && (
-        <div className="mt-4 space-y-2">
+      {title && <div className="text-sm">عنوان: <strong>{title}</strong></div>}
+
+      {(prog || totalBytes) && (
+        <div className="mt-2 space-y-2">
           <div className="w-full bg-gray-200 rounded h-3 overflow-hidden">
             <div
               className="bg-green-600 h-3"
@@ -94,20 +117,38 @@ export default function Page() {
           </div>
           <div className="text-sm text-gray-700">
             {percent.toFixed(1)}% — {downloaded} / {total}
-            {prog.speed ? <> — سرعت: {prog.speed}</> : null}
-            {prog.eta ? <> — زمان باقیمانده: {prog.eta}</> : null}
+            {prog?.speed ? <> — سرعت: {prog.speed}</> : null}
+            {prog?.eta ? <> — زمان باقیمانده: {prog.eta}</> : null}
           </div>
         </div>
       )}
 
-      {error && <p className="text-red-600 mt-4">{error}</p>}
+      {files.length > 0 && (
+        <div className="mt-4">
+          <h2 className="font-semibold mb-2">فایل‌های آمادهٔ دانلود</h2>
+          <ul className="space-y-2">
+            {files.map((f, i) => (
+              <li key={i} className="flex items-center justify-between border rounded p-2">
+                <div className="text-sm">
+                  <div className="font-medium">{f.filename}</div>
+                  <div className="text-gray-600">{formatBytes(f.sizeBytes)}</div>
+                </div>
+                <a href={f.downloadUrl} className="underline">دانلود</a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
-      {downloadUrl && (
+      {error && <p className="text-red-600">{error}</p>}
+
+      {/* سازگاری: اگر فقط یک فایل باشد */}
+      {downloadUrl && files.length === 0 && (
         <a href={downloadUrl} className="mt-4 inline-block underline">دریافت فایل</a>
       )}
 
-      <p className="text-sm text-gray-500 mt-6">
-        فقط لینک‌های یوتیوب مجاز است. لینک ایجادشده یک‌بارمصرف است.
+      <p className="text-sm text-gray-500">
+        فقط لینک‌های یوتیوب مجاز است. لینک‌ها یک‌بارمصرف‌اند و پس از دانلود حذف می‌شوند.
       </p>
     </main>
   )
