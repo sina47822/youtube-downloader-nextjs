@@ -16,12 +16,11 @@ export default function Page() {
   const [url, setUrl] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null) // برای حالت تک‌فایل (سازگاری قدیمی)
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
   const [prog, setProg] = useState<Prog | null>(null)
   const [title, setTitle] = useState<string | null>(null)
   const [totalBytes, setTotalBytes] = useState<number | null>(null)
-  const [files, setFiles] = useState<FileItem[]>([]) // ⟵ همهٔ فایل‌ها (برای Playlist چندتا)
-
+  const [files, setFiles] = useState<FileItem[]>([])
   const esRef = useRef<EventSource | null>(null)
 
   useEffect(() => () => { esRef.current?.close() }, [])
@@ -36,13 +35,14 @@ export default function Page() {
     setFiles([])
     setLoading(true)
 
-    // اگر می‌خواهی Playlist را هم بگیری، ?playlist=1 اضافه کن
-    const es = new EventSource(`/api/download/?url=${encodeURIComponent(url)}`)
+    const es = new EventSource(`/api/download?url=${encodeURIComponent(url)}&debug=1`)
     esRef.current = es
+
+    es.addEventListener('open', () => console.log('SSE opened'))
 
     es.addEventListener('info', (ev) => {
       try {
-        const data = JSON.parse((ev as MessageEvent).data) as { title?: string; totalBytes?: number }
+        const data = JSON.parse((ev as MessageEvent).data) as { title?: string; totalBytes?: number; totalBytesText?: string }
         if (data.title) setTitle(data.title)
         if (typeof data.totalBytes === 'number') setTotalBytes(data.totalBytes)
       } catch {}
@@ -60,7 +60,6 @@ export default function Page() {
       try {
         const data = JSON.parse((ev as MessageEvent).data) as FileItem
         setFiles(prev => [...prev, data])
-        // برای سازگاری با نسخهٔ قدیمی:
         if (!downloadUrl) setDownloadUrl(data.downloadUrl)
       } catch {}
     })
@@ -70,16 +69,28 @@ export default function Page() {
       es.close()
     })
 
-    es.addEventListener('error', (ev) => {
+    es.addEventListener('log', (ev) => {
       try {
-        const data = JSON.parse((ev as MessageEvent).data) as { error?: string }
-        setError(data?.error || 'خطا در دانلود')
-      } catch {
-        setError('خطا در دانلود')
-      } finally {
-        setLoading(false)
-        es.close()
+        const { line } = JSON.parse((ev as MessageEvent).data)
+        if (line) console.debug('[yt-dlp]', line.trim())
+      } catch {}
+    })
+
+    es.addEventListener('error', (ev) => {
+      const msgEvt = ev as MessageEvent
+      if (typeof msgEvt.data === 'string' && msgEvt.data.length) {
+        try {
+          const data = JSON.parse(msgEvt.data) as { error?: string }
+          setError(data?.error || 'خطا')
+        } catch {
+          setError(msgEvt.data)
+        }
+      } else {
+        console.error('SSE error / network:', es.readyState, ev)
+        setError('اتصال برقرار نشد یا پاسخ معتبر نبود')
       }
+      setLoading(false)
+      es.close()
     })
   }
 
@@ -97,7 +108,7 @@ export default function Page() {
           required
           placeholder="مثلاً https://www.youtube.com/watch?v=..."
           value={url}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUrl(e.target.value)}
+          onChange={(e) => setUrl(e.target.value)}
           className="w-full border rounded p-3"
         />
         <button disabled={loading} className="px-4 py-2 rounded bg-black text-white disabled:opacity-50">
@@ -110,10 +121,7 @@ export default function Page() {
       {(prog || totalBytes) && (
         <div className="mt-2 space-y-2">
           <div className="w-full bg-gray-200 rounded h-3 overflow-hidden">
-            <div
-              className="bg-green-600 h-3"
-              style={{ width: `${Math.min(100, Math.max(0, percent)).toFixed(1)}%` }}
-            />
+            <div className="bg-green-600 h-3" style={{ width: `${Math.min(100, Math.max(0, percent)).toFixed(1)}%` }} />
           </div>
           <div className="text-sm text-gray-700">
             {percent.toFixed(1)}% — {downloaded} / {total}
@@ -142,7 +150,6 @@ export default function Page() {
 
       {error && <p className="text-red-600">{error}</p>}
 
-      {/* سازگاری: اگر فقط یک فایل باشد */}
       {downloadUrl && files.length === 0 && (
         <a href={downloadUrl} className="mt-4 inline-block underline">دریافت فایل</a>
       )}

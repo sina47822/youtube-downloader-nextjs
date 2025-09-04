@@ -1,10 +1,10 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
-  /* config options here */
   experimental: {
     serverActions: { allowedOrigins: ['*'] },
   },
-};
+  output: 'standalone', // ⟵ مهم برای Docker runtime جمع‌وجور
+}
 
-export default nextConfig;
+export default nextConfig

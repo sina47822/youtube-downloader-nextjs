@@ -5,6 +5,7 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
+      - NODE_ENV=production
       - DOWNLOAD_DIR=/data/downloads
       - YTDLP_PATH=/usr/local/bin/yt-dlp
     ports:
